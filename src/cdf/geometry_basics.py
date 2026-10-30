@@ -35,6 +35,28 @@ def create_cone(base_point=None, height=10.0, radius=5.0, cap_bottom=True):
     cone = rg.Cone(plane, height, radius)
     return cone.ToBrep(cap_bottom)
 
+
+def create_triangle(point_a=None, point_b=None, point_c=None):
+    """
+    Build a closed triangular polyline curve.
+
+    point_a : Rhino.Geometry.Point3d -- first triangle vertex
+    point_b : Rhino.Geometry.Point3d -- second triangle vertex
+    point_c : Rhino.Geometry.Point3d -- third triangle vertex
+
+    Returns a Rhino.Geometry.PolylineCurve.
+    """
+    if point_a is None:
+        point_a = rg.Point3d(0, 0, 0)
+    if point_b is None:
+        point_b = rg.Point3d(10, 0, 0)
+    if point_c is None:
+        point_c = rg.Point3d(5, 10, 0)
+
+    points = rg.Polyline([point_a, point_b, point_c, point_a])
+    return rg.PolylineCurve(points)
+
+
 def create_sphere():
     pass  # TODO: Implement this function to create a sphere using Rhino.Geometry
 
