@@ -303,6 +303,53 @@ def randomize_shape_colors(
     return result
 
 
+<<<<<<< Updated upstream
+=======
+def group_shapes_by_color(shapes, colors):
+    """Group shapes by their corresponding colors for Grasshopper baking.
+
+    Returns ``(shape_groups, group_colors, layer_names)``. Each nested list
+    in ``shape_groups`` contains the shapes assigned to one exact RGBA color.
+    """
+    if shapes is None or colors is None:
+        raise ValueError("Both shapes and colors must be provided.")
+
+    shapes = list(shapes)
+    colors = list(colors)
+    if len(shapes) != len(colors):
+        raise ValueError("shapes and colors must have the same length.")
+
+    def color_key(color):
+        if all(hasattr(color, channel) for channel in ("R", "G", "B")):
+            return (
+                int(color.R),
+                int(color.G),
+                int(color.B),
+                int(color.A) if hasattr(color, "A") else 255,
+            )
+        values = tuple(int(value) for value in color)
+        if len(values) == 3:
+            values += (255,)
+        if len(values) != 4:
+            raise TypeError("Each color must be a swatch or an RGB/RGBA sequence.")
+        return values
+
+    groups = {}
+    for shape, color in zip(shapes, colors):
+        key = color_key(color)
+        groups.setdefault(key, []).append(shape)
+
+    ordered_keys = list(groups)
+    shape_groups = [groups[key] for key in ordered_keys]
+    group_colors = [key for key in ordered_keys]
+    layer_names = [
+        "CDF1_{0}_{1}_{2}".format(red, green, blue)
+        for red, green, blue, alpha in ordered_keys
+    ]
+    return shape_groups, group_colors, layer_names
+
+
+>>>>>>> Stashed changes
 def random_boolean_difference(solids, probability=0.5, seed=None, tolerance=0.001):
     """Randomly subtract overlapping solids and replace successful pairs.
 
@@ -385,3 +432,575 @@ def random_boolean_difference(solids, probability=0.5, seed=None, tolerance=0.00
     return result
 
 
+<<<<<<< Updated upstream
+=======
+def _require_rhino():
+    if rg is None:
+        raise RuntimeError("This function requires Rhino.Geometry in Rhino/Grasshopper.")
+
+
+def _as_point3d(point):
+    if hasattr(point, "X"):
+        return point
+    return rg.Point3d(float(point[0]), float(point[1]), float(point[2]))
+
+
+def _surface_from_ceiling(ceiling):
+    _require_rhino()
+    if isinstance(ceiling, rg.Brep):
+        if ceiling.Faces.Count != 1:
+            raise ValueError("ceiling must be a single planar Brep face or surface.")
+        return ceiling.Faces[0]
+    if isinstance(ceiling, rg.BrepFace):
+        return ceiling
+    if isinstance(ceiling, rg.Surface):
+        return ceiling
+    return None
+
+
+def _plane_from_rectangle(rectangle):
+    if isinstance(rectangle, rg.Plane):
+        return rectangle
+    if hasattr(rectangle, "TryGetPlane"):
+        result = rectangle.TryGetPlane()
+        if isinstance(result, tuple):
+            if not result[0]:
+                raise ValueError("ceiling rectangle must be planar.")
+            return result[1]
+        if result:
+            return result
+    raise TypeError("ceiling must be a Rhino surface, planar rectangle curve, or Plane.")
+
+
+def create_attachment_grid(
+    width=1000.0,
+    depth=1000.0,
+    center_x=None,
+    center_y=None,
+    height=3000.0,
+    u_count=5,
+    v_count=5,
+):
+    """Create a horizontal, fully parametric ceiling attachment grid.
+
+    The grid lies in the XY plane at ``height``. U and V are represented by
+    ``u_count`` and ``v_count`` points, including both boundaries.
+    """
+    _require_rhino()
+    width = float(width)
+    depth = float(depth)
+    center_x = 0.0 if center_x is None else float(center_x)
+    center_y = 0.0 if center_y is None else float(center_y)
+    height = float(height)
+    u_count = int(u_count)
+    v_count = int(v_count)
+    if width <= 0 or depth <= 0:
+        raise ValueError("width and depth must be positive.")
+    if u_count < 2 or v_count < 2:
+        raise ValueError("u_count and v_count must both be at least 2.")
+
+    min_x = center_x - width / 2.0
+    min_y = center_y - depth / 2.0
+    points = []
+    grid_curves = []
+    for row in range(v_count):
+        y = min_y + depth * row / float(v_count - 1)
+        row_points = [
+            rg.Point3d(
+                min_x + width * column / float(u_count - 1),
+                y,
+                height,
+            )
+            for column in range(u_count)
+        ]
+        points.extend(row_points)
+        grid_curves.append(rg.Polyline(row_points).ToNurbsCurve())
+    for column in range(u_count):
+        column_points = [
+            rg.Point3d(
+                min_x + width * column / float(u_count - 1),
+                min_y + depth * row / float(v_count - 1),
+                height,
+            )
+            for row in range(v_count)
+        ]
+        grid_curves.append(rg.Polyline(column_points).ToNurbsCurve())
+    return points, grid_curves
+
+
+def create_ceiling_surface(
+    width=1000.0,
+    depth=1000.0,
+    center_x=0.0,
+    center_y=0.0,
+    height=3000.0,
+):
+    """Create a planar ceiling surface matching the attachment grid."""
+    _require_rhino()
+    width = float(width)
+    depth = float(depth)
+    center_x = 0.0 if center_x is None else float(center_x)
+    center_y = 0.0 if center_y is None else float(center_y)
+    height = float(height)
+    if width <= 0 or depth <= 0:
+        raise ValueError("width and depth must be positive.")
+
+    plane = rg.Plane(rg.Point3d(center_x, center_y, height), rg.Vector3d.ZAxis)
+    corners = [
+        plane.PointAt(-width / 2.0, -depth / 2.0),
+        plane.PointAt(width / 2.0, -depth / 2.0),
+        plane.PointAt(width / 2.0, depth / 2.0),
+        plane.PointAt(-width / 2.0, depth / 2.0),
+        plane.PointAt(-width / 2.0, -depth / 2.0),
+    ]
+    boundary = rg.Polyline(corners).ToNurbsCurve()
+    surfaces = rg.Brep.CreatePlanarBreps(boundary)
+    if not surfaces:
+        raise RuntimeError("Could not create the ceiling surface.")
+    return [surfaces[0]]
+
+
+def boolean_difference_touching(solids, tolerance=0.001):
+    """Remove intersections between every pair of closed Brep solids.
+
+    Each intersecting pair is replaced by the two remaining difference
+    results. Non-intersecting solids are returned unchanged.
+    """
+    _require_rhino()
+    if solids is None:
+        raise ValueError("solids must be provided.")
+    tolerance = float(tolerance)
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive.")
+    if isinstance(solids, rg.Brep):
+        solids = [solids]
+    else:
+        try:
+            solids = list(solids)
+        except TypeError as error:
+            raise TypeError(
+                "solids must be a closed Brep or an iterable of closed Breps."
+            ) from error
+    current = solids
+    if any(solid is None or not solid.IsSolid for solid in current):
+        raise ValueError("Every input must be a non-null, closed Rhino Brep solid.")
+
+    def bbox_overlaps(first, second):
+        a = first.GetBoundingBox(True)
+        b = second.GetBoundingBox(True)
+        return not (
+            a.Max.X < b.Min.X - tolerance or b.Max.X < a.Min.X - tolerance
+            or a.Max.Y < b.Min.Y - tolerance or b.Max.Y < a.Min.Y - tolerance
+            or a.Max.Z < b.Min.Z - tolerance or b.Max.Z < a.Min.Z - tolerance
+        )
+
+    def difference(target, cutter):
+        result = rg.Brep.CreateBooleanDifference(target, cutter, tolerance)
+        if result is None:
+            return []
+        return [result] if isinstance(result, rg.Brep) else list(result)
+
+    index = 0
+    while index < len(current):
+        other_index = index + 1
+        while other_index < len(current):
+            first, second = current[index], current[other_index]
+            if not bbox_overlaps(first, second):
+                other_index += 1
+                continue
+            intersection = rg.Brep.CreateBooleanIntersection(first, second, tolerance)
+            if not intersection:
+                other_index += 1
+                continue
+            first_result = difference(first, second)
+            second_result = difference(second, first)
+            if not first_result and not second_result:
+                other_index += 1
+                continue
+            current = (
+                current[:index]
+                + first_result
+                + current[index + 1:other_index]
+                + second_result
+                + current[other_index + 1:]
+            )
+            other_index = index + 1
+        index += 1
+    return current
+
+
+def clip_geometries_to_grid_box(
+    geometries,
+    width,
+    depth,
+    center_x,
+    center_y,
+    height,
+    tolerance=0.001,
+    boundary_tolerance=0.0,
+):
+    """Keep only the solid portions below and inside the grid footprint.
+
+    The grid plane is the top of a vertical box. The bottom of the box is
+    placed below the lowest input geometry, so the box is effectively open
+    downward for the supplied set of geometries.
+    """
+    _require_rhino()
+    if geometries is None:
+        raise ValueError("geometries must be provided.")
+    if isinstance(geometries, rg.Brep):
+        geometries = [geometries]
+    else:
+        geometries = list(geometries)
+    if not geometries:
+        return []
+
+    width = float(width)
+    depth = float(depth)
+    center_x = float(center_x)
+    center_y = float(center_y)
+    height = float(height)
+    tolerance = float(tolerance)
+    boundary_tolerance = float(boundary_tolerance)
+    if width <= 0 or depth <= 0:
+        raise ValueError("width and depth must be positive.")
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive.")
+    if boundary_tolerance < 0:
+        raise ValueError("boundary_tolerance must be non-negative.")
+    if any(geometry is None or not geometry.IsSolid for geometry in geometries):
+        raise ValueError("Every input must be a non-null, closed Rhino Brep solid.")
+
+    footprint_min_x = center_x - width / 2.0
+    footprint_max_x = center_x + width / 2.0
+    footprint_min_y = center_y - depth / 2.0
+    footprint_max_y = center_y + depth / 2.0
+    boxes = [geometry.GetBoundingBox(True) for geometry in geometries]
+    inside_footprint = []
+    outside_footprint_count = 0
+    for geometry, bbox in zip(geometries, boxes):
+        geometry_center = bbox.Center
+        if (
+            geometry_center.X < footprint_min_x - boundary_tolerance
+            or geometry_center.X > footprint_max_x + boundary_tolerance
+            or geometry_center.Y < footprint_min_y - boundary_tolerance
+            or geometry_center.Y > footprint_max_y + boundary_tolerance
+        ):
+            outside_footprint_count += 1
+            continue
+        inside_footprint.append(geometry)
+
+    if not inside_footprint:
+        return [], outside_footprint_count, 0
+
+    bottom = min(
+        geometry.GetBoundingBox(True).Min.Z for geometry in inside_footprint
+    ) - tolerance
+    clipped = []
+    above_ceiling_count = 0
+    for geometry in inside_footprint:
+        bbox = geometry.GetBoundingBox(True)
+        if bbox.Min.Z >= height - tolerance:
+            above_ceiling_count += 1
+            continue
+        if bbox.Max.Z <= height + tolerance:
+            clipped.append(geometry)
+            continue
+
+        box_plane = rg.Plane(rg.Point3d(bbox.Center.X, bbox.Center.Y, 0), rg.Vector3d.ZAxis)
+        cutter = rg.Box(
+            box_plane,
+            rg.Interval(bbox.Min.X - bbox.Center.X - tolerance, bbox.Max.X - bbox.Center.X + tolerance),
+            rg.Interval(bbox.Min.Y - bbox.Center.Y - tolerance, bbox.Max.Y - bbox.Center.Y + tolerance),
+            rg.Interval(bottom, height),
+        ).ToBrep()
+        pieces = rg.Brep.CreateBooleanIntersection(geometry, cutter, tolerance)
+        if pieces is None:
+            clipped.append(geometry)
+            continue
+        if isinstance(pieces, rg.Brep):
+            pieces = [pieces]
+        pieces = [piece for piece in pieces if piece is not None and piece.IsSolid]
+        clipped.extend(pieces if pieces else [geometry])
+    return clipped, outside_footprint_count, above_ceiling_count
+
+
+def _brep_center(brep):
+    try:
+        properties = rg.VolumeMassProperties.Compute(brep)
+        if properties is not None:
+            return properties.Centroid
+    except Exception:
+        pass
+    return brep.GetBoundingBox(True).Center
+
+
+def _face_closest_point(face, point):
+    result = face.ClosestPoint(point)
+    if isinstance(result, tuple):
+        if len(result) == 3:
+            success, u, v = result
+            if not success:
+                return None
+        elif len(result) == 2:
+            u, v = result
+        else:
+            return None
+    else:
+        return None
+    return face.PointAt(u, v), face.NormalAt(u, v)
+
+
+def _top_attachment(brep):
+    center = _brep_center(brep)
+    bbox = brep.GetBoundingBox(True)
+    target = rg.Point3d(center.X, center.Y, bbox.Max.Z + bbox.Diagonal.Length)
+    best = None
+    best_distance = float("inf")
+    for face in brep.Faces:
+        closest = _face_closest_point(face, target)
+        if closest is None:
+            continue
+        point, normal = closest
+        distance = point.DistanceTo(target)
+        if distance < best_distance:
+            best, best_distance = (point, normal), distance
+    if best is None:
+        raise RuntimeError("Could not find a top attachment point on a Brep.")
+    point, normal = best
+    if rg.Vector3d.Multiply(normal, point - center) < 0:
+        normal = -normal
+    normal.Unitize()
+    return point, normal
+
+
+def _segment_intersects_box(start, end, bbox, clearance):
+    minimum = (bbox.Min.X - clearance, bbox.Min.Y - clearance, bbox.Min.Z - clearance)
+    maximum = (bbox.Max.X + clearance, bbox.Max.Y + clearance, bbox.Max.Z + clearance)
+    origin = (start.X, start.Y, start.Z)
+    direction = (end.X - start.X, end.Y - start.Y, end.Z - start.Z)
+    t_min, t_max = 0.0, 1.0
+    for axis in range(3):
+        if abs(direction[axis]) < 1e-12:
+            if origin[axis] < minimum[axis] or origin[axis] > maximum[axis]:
+                return False
+            continue
+        first = (minimum[axis] - origin[axis]) / direction[axis]
+        last = (maximum[axis] - origin[axis]) / direction[axis]
+        if first > last:
+            first, last = last, first
+        t_min, t_max = max(t_min, first), min(t_max, last)
+        if t_min > t_max:
+            return False
+    return True
+
+
+def _segment_is_clear(start, end, obstacles, clearance, tolerance):
+    line = rg.LineCurve(start, end)
+    for obstacle in obstacles:
+        if not _segment_intersects_box(start, end, obstacle.GetBoundingBox(True), clearance):
+            continue
+        if clearance > 0:
+            expanded = obstacle.GetBoundingBox(True)
+            expanded.Inflate(clearance)
+            if _segment_intersects_box(start, end, expanded, 0.0):
+                return False
+        intersections = rg.Intersect.Intersection.CurveBrep(
+            line,
+            obstacle,
+            tolerance,
+        )
+        if intersections and len(intersections) > 0:
+            return False
+    return True
+
+
+def _route_wire(start, end, obstacles, clearance, tolerance):
+    if _segment_is_clear(start, end, obstacles, clearance, tolerance):
+        return rg.LineCurve(start, end), False
+
+    if obstacles:
+        safe_z = max(
+            obstacle.GetBoundingBox(True).Max.Z
+            for obstacle in obstacles
+        ) + clearance + tolerance
+        high_start = rg.Point3d(start.X, start.Y, safe_z)
+        high_end = rg.Point3d(end.X, end.Y, safe_z)
+        safe_path = [start, high_start, high_end, end]
+        if all(
+            _segment_is_clear(first, second, obstacles, clearance, tolerance)
+            for first, second in zip(safe_path, safe_path[1:])
+        ):
+            return rg.Polyline(safe_path).ToNurbsCurve(), True
+
+    direction = end - start
+    if not direction.Unitize():
+        return None, True
+    vertical = rg.Vector3d.ZAxis
+    side = rg.Vector3d.CrossProduct(direction, vertical)
+    if not side.Unitize():
+        side = rg.Vector3d.XAxis
+    candidates = []
+    for obstacle in obstacles:
+        bbox = obstacle.GetBoundingBox(True)
+        center = bbox.Center
+        along = rg.Vector3d.Multiply(center - start, direction)
+        base = start + direction * along
+        radius = 0.5 * bbox.Diagonal.Length + clearance
+        candidates.extend((base + side * radius, base - side * radius))
+
+    for candidate in candidates:
+        if (
+            _segment_is_clear(start, candidate, obstacles, clearance, tolerance)
+            and _segment_is_clear(candidate, end, obstacles, clearance, tolerance)
+        ):
+            return rg.Polyline([start, candidate, end]).ToNurbsCurve(), True
+    return None, True
+
+
+def create_hanging_system(
+    geometries,
+    width=1000.0,
+    depth=1000.0,
+    center_x=None,
+    center_y=None,
+    height=3000.0,
+    u_count=5,
+    v_count=5,
+    clearance=100.0,
+    tolerance=0.001,
+    boundary_tolerance=100.0,
+):
+    """Clean solids and create collision-free ceiling wires.
+
+    Returns ``(cleaned_geometries, grid_points, grid_curves, wires, diagnostics)``.
+    Geometry count must not exceed the number of grid points.
+    """
+    _require_rhino()
+    if geometries is None:
+        raise ValueError("geometries must be provided.")
+    if isinstance(geometries, rg.Brep):
+        geometries = [geometries]
+    else:
+        geometries = list(geometries)
+    if not geometries:
+        raise ValueError("geometries must contain at least one closed Brep.")
+    clearance = float(clearance)
+    if clearance < 0:
+        raise ValueError("clearance must be non-negative.")
+    raw_boxes = [geometry.GetBoundingBox(True) for geometry in geometries]
+    domain_min = rg.Point3d(
+        min(box.Min.X for box in raw_boxes),
+        min(box.Min.Y for box in raw_boxes),
+        min(box.Min.Z for box in raw_boxes),
+    )
+    domain_max = rg.Point3d(
+        max(box.Max.X for box in raw_boxes),
+        max(box.Max.Y for box in raw_boxes),
+        max(box.Max.Z for box in raw_boxes),
+    )
+    if center_x is None:
+        center_x = (domain_min.X + domain_max.X) / 2.0
+    if center_y is None:
+        center_y = (domain_min.Y + domain_max.Y) / 2.0
+
+    grid_points, grid_curves = create_attachment_grid(
+        width,
+        depth,
+        center_x,
+        center_y,
+        height,
+        u_count,
+        v_count,
+    )
+    clipped, outside_footprint_count, above_ceiling_count = clip_geometries_to_grid_box(
+        geometries,
+        width,
+        depth,
+        center_x,
+        center_y,
+        height,
+        tolerance,
+        boundary_tolerance,
+    )
+    diagnostics = []
+    if outside_footprint_count:
+        diagnostics.append(
+            "{0} geometry(ies) removed because their center is outside the "
+            "grid footprint.".format(
+                outside_footprint_count
+            )
+        )
+    if above_ceiling_count:
+        diagnostics.append(
+            "{0} geometry(ies) removed because they are entirely above the "
+            "ceiling height.".format(above_ceiling_count)
+        )
+    cleaned = boolean_difference_touching(clipped, tolerance)
+    if not cleaned:
+        diagnostics.append("No geometry remains inside the grid box.")
+        return [], grid_points, grid_curves, [], diagnostics
+    if len(cleaned) > len(grid_points):
+        raise ValueError("There are more geometries than available grid attachment points.")
+
+    while cleaned:
+        centers = [_brep_center(geometry) for geometry in cleaned]
+        distance_pairs = sorted(
+            (
+                (center.DistanceTo(point), geometry_index, point_index)
+                for geometry_index, center in enumerate(centers)
+                for point_index, point in enumerate(grid_points)
+            ),
+            key=lambda item: item[0],
+        )
+        assigned_geometries = set()
+        assigned_points = set()
+        ordered_points = [None] * len(cleaned)
+        for distance, geometry_index, point_index in distance_pairs:
+            if geometry_index in assigned_geometries or point_index in assigned_points:
+                continue
+            ordered_points[geometry_index] = grid_points[point_index]
+            assigned_geometries.add(geometry_index)
+            assigned_points.add(point_index)
+            if len(assigned_geometries) == len(cleaned):
+                break
+
+        wires = []
+        rejected = []
+        for index, (geometry, start) in enumerate(zip(cleaned, ordered_points)):
+            if start is None:
+                rejected.append(index)
+                continue
+            contact, normal = _top_attachment(geometry)
+            contact += normal * tolerance
+            obstacles = [other for other in cleaned if other is not geometry]
+            wire, detoured = _route_wire(start, contact, obstacles, clearance, tolerance)
+            if wire is None:
+                rejected.append(index)
+                diagnostics.append(
+                    "Geometry {0}: removed because no collision-free wire route exists.".format(
+                        index
+                    )
+                )
+                continue
+            wires.append(wire)
+            diagnostics.append(
+                "Geometry {0}: attachment point ({1:.3f}, {2:.3f}, {3:.3f}).".format(
+                    index,
+                    start.X,
+                    start.Y,
+                    start.Z,
+                )
+            )
+            if detoured:
+                diagnostics.append("Geometry {0}: direct route blocked; detour created.".format(index))
+            else:
+                diagnostics.append("Geometry {0}: direct route is clear.".format(index))
+        if not rejected:
+            break
+        cleaned = [
+            geometry for index, geometry in enumerate(cleaned)
+            if index not in rejected
+        ]
+    return cleaned, grid_points, grid_curves, wires, diagnostics
+>>>>>>> Stashed changes
